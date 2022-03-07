@@ -6,10 +6,10 @@ mp_drawing_styles = mp.solutions.drawing_styles
 mp_pose = mp.solutions.pose
 
 # For webcam input:
-all_cam_ids = [0, 1, 2, 4]
+all_cam_ids = [0, 2, 3, 4]
 all_caps = [cv2.VideoCapture(c) for c in all_cam_ids]
 
-with mp_pose.Pose(model_complexity=2, min_detection_confidence=0.5, min_tracking_confidence=0.8) as pose:
+with mp_pose.Pose(model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
     finish = False
     while not finish:
         for cam_id, cap in zip(all_cam_ids, all_caps):
