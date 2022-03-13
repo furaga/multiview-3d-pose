@@ -4,6 +4,7 @@ import numpy as np
 import cv2
 import glob
 from pathlib import Path
+import pandas as pd
 
 
 def parse_args():
@@ -30,15 +31,24 @@ def main(args):
     obj_pt3d[:, :2] *= 0.02
 
     # Arrays to store object points and image points from all the images.
-    objpoints = {}  # 3d point in real world space
-    imgpoints = {}  # 2d points in image plane.
+    points3d = {}  # 3d point in real world space
+    points2d = {}  # 2d points in image plane.
 
     all_video_paths = args.input_dir.glob("*.mp4")
     all_caps = {p.stem: cv2.VideoCapture(str(p)) for p in all_video_paths}
 
     frame = 0
+    all_dfs = {}
+    for name in all_caps:
+        df = pd.read_csv(args.board_dir / f"{name}.csv")
+        f2c = {}
+        for row in df.values:
+            f2c[int(row[0])] = np.reshape([np.float32(t) for t in row[1:]], (-1, 1, 2))
+        all_dfs[name] = f2c
 
-    out_video = None
+    all_ids = []
+    all_pts3d = []
+    all_pts2d = []
     while True:
         images = []
         frame += 1
@@ -54,56 +64,28 @@ def main(args):
 
             h, w = img.shape[:2]
 
-            board_path = args.board_dir / f"{name}_{frame:05d}.txt"
-            if board_path.exists():
-                with open(board_path) as f:
-                    corners2 = [np.float32(t) for t in f.read().strip().split(",")]
-                    corners2 = np.reshape(corners2, (-1, 1, 2))
+            if frame in all_dfs[name]:
+                corners2 = all_dfs[name][frame]
                 img = cv2.drawChessboardCorners(img, (gw, gh), corners2, ret)
-                objpoints.setdefault("all", []).append(obj_pt3d)
-                imgpoints.setdefault("all", []).append(corners2)
+                all_ids.append((frame, name))
+                all_pts3d.append(obj_pt3d)
+                all_pts2d.append(corners2)
 
             images.append(img)
 
         if finish:
             break
 
-        black = np.zeros_like(img)
-        images.append(black)
+    # all_pts3d = all_pts3d[::16]
+    # all_pts2d = all_pts2d[::16]
+    # all_ids = all_ids[::16]
 
-        assert len(images) == 6
-        combined = cv2.vconcat(
-            [
-                cv2.hconcat(images[0:2]),
-                cv2.hconcat(images[2:4]),
-                cv2.hconcat(images[4:6]),
-            ]
-        )
-
-        if out_video is None:
-            fourcc = cv2.VideoWriter_fourcc(*"MP4V")
-            out_video = cv2.VideoWriter(
-                str(args.out_dir / "calibration.mp4"),
-                fourcc,
-                25,
-                (combined.shape[1], combined.shape[0]),
-            )
-
-        out_video.write(combined)
-        cv2.imshow("combined", cv2.resize(combined, None, fx=0.5, fy=0.5))
-        if ord("q") == cv2.waitKey(1):
-            break
-
-    print("Calibrating...")
-    all_pts3d = []
-    all_pts2d = []
-    for name in objpoints.keys():
-        all_pts3d += objpoints[name]
-        all_pts2d += imgpoints[name]
+    print("Calibrating: # of data =", len(all_pts3d))
 
     ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
         all_pts3d, all_pts2d, (w, h), None, None
     )
+
     if ret:
         with open(args.out_dir / f"intrinsics_{name}.txt", "w") as f:
             f.write(",".join([str(v) for v in mtx.ravel()]))
@@ -111,8 +93,9 @@ def main(args):
             f.write(",".join([str(v) for v in dist.ravel()]))
             f.write("\n")
 
-    if out_video is not None:
-        out_video.release()
+    print(repr(np.array([v.ravel() for v in rvecs])))
+    print(repr(np.array([v.ravel() for v in tvecs])))
+    print(all_ids)
 
 
 if __name__ == "__main__":
