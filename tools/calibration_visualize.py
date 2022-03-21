@@ -59,11 +59,11 @@ def make_Rt(R, t, expand=False):
 
 def main(args):
 
-    #     rvecs, tvecs, all_ids = calib.result.rvecs, calib.result.tvecs, calib.result.all_ids
+    rvecs, tvecs, all_ids = calib.result.rvecs, calib.result.tvecs, calib.result.all_ids
 
-    n_view = 100
-    rvecs, tvecs = calib.test_result.make_view_poses(n_view, 1.0)
-    all_ids = [(1, f"camera_{i}") for i in range(n_view)]
+    # n_view = 100
+    # rvecs, tvecs = calib.test_result.make_view_poses(n_view, 1.0)
+    # all_ids = [(1, f"camera_{i}") for i in range(n_view)]
     assert len(rvecs) == len(tvecs)
     assert len(all_ids) == len(tvecs)
 
@@ -109,38 +109,47 @@ def main(args):
             Rt2 = make_Rt(R2, t2, expand=True)
             iRt1 = np.linalg.inv(Rt1)
             rel = np.matmul(Rt1, Rt2)  # 逆？
-            rel = rel[:3, :]
             # print("===", cam_id1, cam_id2)
             # print("Rt2", Rt2)
             # print("Rt1", Rt1)
             # print("rel", rel)
             edges.setdefault((cam_id1, cam_id2), []).append(rel)
 
-    points3d = []  # np.zeros(3, float)]
-    colors = []  # cam_id_colors[all_cam_ids[0]]]
-
-    cam_positions = [np.zeros(3, float)]
-   # print(all_cam_ids)
+    points3d = [np.zeros(3, float)]
+    colors = [cam_id_colors[all_cam_ids[0]]]
 
    # print(list(edges.keys()))
-    for i in range(0, len(all_cam_ids)):
+    all_Rt = {}
+    all_Rt[all_cam_ids[0]] = np.eye(4)
+    for i in range(1, len(all_cam_ids)):
         cam_id2 = all_cam_ids[i]
-        for j in range(i + 1):
+        Rts = []
+        for j in range(i):
             if j != 0:
-                continue  # todo
+                continue
+            # M0 = all_Rt[all_cam_ids[0]]
+            # Mj = all_Rt[all_cam_ids[j]]
+            # print(M0, Mj)
+            # base = np.matmul(M0, np.linalg.inv(Mj))
+            base = np.eye(4)
+
             cam_id1 = all_cam_ids[j]
             es = []
             if (cam_id1, cam_id2) in edges:
                 es = edges[(cam_id1, cam_id2)]
             if (cam_id2, cam_id1) in edges:
                 es = edges[(cam_id2, cam_id1)]
-    #        print((cam_id1, cam_id2))
             for rel in es:
-                R = rel[:3, :3]
-                t = rel[:3, 3].ravel()
+                M = np.matmul(base, rel) # M0Mi
+                R = M[:3, :3]
+                t = M[:3, 3].ravel()
                 pt3d = make_view_position(R, t)
                 points3d.append(pt3d)
                 colors.append(cam_id_colors[cam_id2])
+                Rts.append(make_Rt(R, t, expand=True))
+
+        print(Rts)
+        all_Rt[all_cam_ids[i]] = np.mean(Rts, axis=0)
 
    # print(points3d)
     c = np.array((0, 0, 0), float)
