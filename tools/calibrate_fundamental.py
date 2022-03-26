@@ -75,7 +75,7 @@ def new_plt(world_size=0.5):
     return ax
 
 
-def show_plt(block):
+def show_plt(block=True):
     plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
     plt.show(block=block)
 
@@ -104,22 +104,10 @@ def make_Rt(R, t, expand=False):
     return Rt
 
 
-def draw_camera(ax, R, t, id):
-    # fig = plt.figure(figsize=(9, 9))
-    # ax = fig.add_subplot(111, projection="3d")
-    # ax.set_title("3D Points")
-    # ax.set_xlabel("X")
-    # ax.set_ylabel("Y")
-    # ax.set_zlabel("Z")
-
-    # world_size = 0.6
-    # ax.set_xlim(-world_size, world_size)
-    # ax.set_ylim(-world_size, world_size)
-    # ax.set_zlim(-world_size, world_size)
-
-    x = [1, 0, 0]
-    y = [0, 1, 0]
-    z = [0, 0, 1]
+def draw_camera(ax, R, t, id, size=1):
+    x = [size, 0, 0]
+    y = [0, size, 0]
+    z = [0, 0, size]
     c = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
     for i in range(3):
         p0 = make_view_position(R, t)
@@ -128,9 +116,7 @@ def draw_camera(ax, R, t, id):
         ax.plot(
             [p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=c[i], ms=4, mew=0.5
         )
-
-    # plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    # plt.show(block=True)
+        ax.text(p0[0], p0[1], p0[2], id, None) 
 
 
 def calc_colors(all_cam_ids):
@@ -202,7 +188,7 @@ def render_points2d(img, points2d, radius, color, thickness):
 
 
 def main(args):
-    debug_show = True
+    debug_show = False
     args.out_dir.mkdir(exist_ok=True)
 
     w, h = 640, 480
@@ -250,10 +236,13 @@ def main(args):
 
         # visualize
         if debug_show:
-            visualize_reconstruction([
-                (np.eye(4), np.eye(3), np.zeros(3), cam_id1),
-                (E, R, t, cam_id2),
-            ], points3d)
+            visualize_reconstruction(
+                [
+                    (np.eye(4), np.eye(3), np.zeros(3), cam_id1),
+                    (E, R, t, cam_id2),
+                ],
+                points3d,
+            )
 
             rvec, _ = cv2.Rodrigues(R)
             tvec = t.ravel()
@@ -278,14 +267,12 @@ def main(args):
             cv2.imshow("", img)
             cv2.waitKey(0)
 
-
-    points3d = [np.zeros(3, float)]
-    colors = [cam_id_colors[all_cam_ids[0]]]
-
     # print(list(edges.keys()))
     all_Rt = {}
     all_Rt[all_cam_ids[0]] = np.eye(4)
 
+    ax = new_plt(world_size=1.5)
+    draw_camera(ax, np.eye(3), np.zeros(3), all_cam_ids[0], size=0.5)
     for i in range(1, len(all_cam_ids)):
         cam_id2 = all_cam_ids[i]
         global_Rts = []
@@ -306,16 +293,15 @@ def main(args):
                 M = np.matmul(base, Rt)  # M0Mi
                 global_R = M[:3, :3]
                 global_t = M[:3, 3]
-
-                pt3d = make_view_position(global_R, global_t)
-                points3d.append(pt3d)
-                colors.append(cam_id_colors[all_cam_ids[i]])
                 global_Rts.append(make_Rt(global_R, global_t, expand=True))
+
+                draw_camera(ax, global_R, global_t, cam_id2, size=0.5)
 
         all_Rt[all_cam_ids[i]] = np.mean(global_Rts, axis=0)
 
-    print(points3d)
-    draw_points3d(points3d, colors, world_size=1.5, center=(0, 0, 0), block=True, s=64)
+    print(all_Rt)
+
+    show_plt(True)
 
 
 if __name__ == "__main__":
