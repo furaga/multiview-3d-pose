@@ -1,5 +1,6 @@
 import argparse
 from email.mime import image
+from json import load
 import numpy as np
 import cv2
 import glob
@@ -132,25 +133,16 @@ def draw_camera(ax, R, t, id):
     # plt.show(block=True)
 
 
-def main(args):
-    # draw_camera(
-    #     np.matmul(calib.test_result.Ry(np.pi / 4), calib.test_result.Rx(np.pi / 4)),
-    #     np.array([0.5, 0.2, 0.3], float),
-    #     "test"
-    # )
-    # exit(0)
-    args.out_dir.mkdir(exist_ok=True)
+def calc_colors(all_cam_ids):
+    # cam_id_colors = {
+    #     c: (
+    #         random.random(),
+    #         random.random(),
+    #         random.random(),
+    #     )
+    #     for c in all_cam_ids
+    # }
 
-    all_ids = calib.result.all_ids
-    all_cam_ids = sorted(set([c for _, c in all_ids]))
-    cam_id_colors = {
-        c: (
-            random.random(),
-            random.random(),
-            random.random(),
-        )
-        for c in all_cam_ids
-    }
     cam_id_colors = {
         all_cam_ids[0]: (0, 0, 1),
         all_cam_ids[1]: (0, 1, 1),
@@ -158,112 +150,136 @@ def main(args):
         all_cam_ids[3]: (0.5, 0.5, 0.5),
     }
 
-    # frame -> Dict[str, List[Point]]
+    return cam_id_colors
+
+
+def load_correspondenses(board_dir, all_cam_ids):
     frame_to_dict = {}
     for name in all_cam_ids:
-        df = pd.read_csv(args.board_dir / f"{name}.csv")
+        df = pd.read_csv(board_dir / f"{name}.csv")
         for row in df.values:
             frame = int(row[0])
             pt2d = np.reshape([np.float32(t) for t in row[1:]], (-1, 1, 2))
             frame_to_dict.setdefault(frame, {})
             frame_to_dict[frame].setdefault(name, []).append(pt2d)
 
-    corr = {}
+    corr_dict = {}
     for frame, dict in frame_to_dict.items():
         for cam_id1, pts1 in dict.items():
             for cam_id2, pts2 in dict.items():
                 if cam_id1 >= cam_id2:
                     continue
                 key = (cam_id1, cam_id2)
-                if key not in corr:
+                if key not in corr_dict:
                     print(key, frame)
-                    corr.setdefault(key, ([], []))
-                    corr[key] = (
-                        corr[key][0] + pts1,
-                        corr[key][1] + pts2,
+                    corr_dict.setdefault(key, ([], []))
+                    corr_dict[key] = (
+                        corr_dict[key][0] + pts1,
+                        corr_dict[key][1] + pts2,
                     )
-    w, h = 640, 480
 
-
-    mtx = calib.result.camera_matrix
-    distort = calib.result.distort
-    Rt_dict = {}
-    for (cam_id1, cam_id2), (pts1, pts2) in corr.items():
+    for k, (pts1, pts2) in corr_dict.items():
         pts1 = np.reshape(pts1, (-1, 2))
         pts2 = np.reshape(pts2, (-1, 2))
+        corr_dict[k] = (pts1, pts2)
+
+    return corr_dict
+
+
+def visualize_reconstruction(pose_infos, points3d):
+    ax = new_plt(world_size=1.5)
+    for E, R, t, label in pose_infos:
+        draw_camera(ax, R, t.ravel(), label)
+    colors = [(0.2, 0.2, 0.2) for _ in points3d]
+    draw_points3d(
+        ax, points3d, colors, world_size=1.5, center=(0, 0, 0), block=True, s=8
+    )
+    show_plt(True)
+
+
+def render_points2d(img, points2d, radius, color, thickness):
+    for p in points2d.reshape((-1, 2)):
+        x, y = p.astype(int)
+        cv2.circle(img, (x, y), radius, color, thickness)
+
+
+def main(args):
+    args.out_dir.mkdir(exist_ok=True)
+
+    w, h = 640, 480
+    mtx = calib.result.camera_matrix
+    distort = calib.result.distort
+    all_ids = calib.result.all_ids
+    all_cam_ids = sorted(set([c for _, c in all_ids]))
+    cam_id_colors = calc_colors(all_cam_ids)
+
+    # (cam_id1, cam_id2) -> (pts1, pts2)
+    corr_dict = load_correspondenses(args.board_dir, all_cam_ids)
+
+    # Calc relative camera poses
+    pose_dict = {}
+    for (cam_id1, cam_id2), (pts1, pts2) in corr_dict.items():
+        # Undistortion
         pts1_undist = geometry.undistort(pts1, mtx, distort)
         pts2_undist = geometry.undistort(pts2, mtx, distort)
 
+        # Find essential matrix
         E, inliers = cv2.findEssentialMat(pts1_undist, pts2_undist, mtx)
+
+        # filter by inliers
         inliers = inliers.ravel()
         pts1_undist = [p for f, p in zip(inliers, pts1_undist) if f >= 1]
         pts2_undist = [p for f, p in zip(inliers, pts2_undist) if f >= 1]
 
-        # print(inliers)
+        # Essential Matrix -> R, t
         ret, R, t = recoverPose(E, pts1_undist, pts2_undist, mtx)
         if not ret:
-            print("failed", (cam_id1, cam_id2))
+            print("Failed to recoverPose", (cam_id1, cam_id2))
+            return
 
-        Rt = make_Rt(R, t)
-        identity = np.eye(4)[:3]
-        proj1 = np.matmul(mtx, identity)
-        proj2 = np.matmul(mtx, Rt)
-
-        points3d = [np.zeros(3, float)]
-        colors = [cam_id_colors[cam_id1]]
-        points3d.append(make_view_position(R, t.ravel()))
-        colors.append(cam_id_colors[cam_id2])
+        proj1 = np.matmul(mtx, np.eye(4)[:3])
+        proj2 = np.matmul(mtx, make_Rt(R, t))
+        points3d = []
         for p1, p2 in zip(pts1_undist, pts2_undist):
             pt3d = geometry.triangulate_nviews(
                 np.array([p1, p2]), np.array([proj1, proj2])
             )
             points3d.append(pt3d)
-            colors.append((0.5, 0.5, 0.5))
 
-        print(cam_id1, cam_id2)
+        points3d = np.array(points3d)
 
         # visualize
-        
-        R1, R2, t_ = cv2.decomposeEssentialMat(E)
-        ax = new_plt(world_size=1.5)
-        draw_camera(ax, np.eye(3), np.zeros(3, float), cam_id1)
-        for _R, _t in [[R1, t_], [R2, t_], [R1, -t_], [R2, -t]]:
-            draw_camera(ax, _R, _t.ravel(), cam_id2)
-        draw_points3d(
-            ax, points3d, colors, world_size=1.5, center=(0, 0, 0), block=True, s=64
-        )
-       # show_plt(True)
+        # visualize_reconstruction([
+        #     (np.eye(4), np.eye(3), np.zeros(3), cam_id1),
+        #     (E, R, t, cam_id2),
+        # ], points3d)
 
         rvec, _ = cv2.Rodrigues(R)
         tvec = t.ravel()
+        img = np.zeros((h, w * 2, 3), np.uint8)
 
-        for (cam_id1, cam_id2), (pts1, pts2) in corr.items():
-            pts1 = np.reshape(pts1, (-1, 2))
-            pts2 = np.reshape(pts2, (-1, 2))
-            img = np.zeros((h, w * 2, 3), np.uint8)
-            for p1, p2 in zip(pts1, pts2):
-                x1, y1 = p1.astype(int)
-                x2, y2 = p2.astype(int)
-#                cv2.line(img, (x1, y1), (x2 + w, y2), (20, 20, 255))
-                cv2.circle(img, (x1, y1), 2, (255, 0, 0), -1)
-                cv2.circle(img, (w + x2, y2), 2, (255, 0, 0), -1)
+        xshift = np.array([[w, 0]])
+        render_points2d(img, pts1, 3, (255, 0, 0), -1)
+        render_points2d(img, pts2 + xshift, 3, (255, 0, 0), -1)
 
-            points2d, _ = cv2.projectPoints(np.array(points3d), np.zeros_like(rvec), np.zeros_like(tvec), mtx, distort)
-            for p in points2d.reshape((-1, 2)):
-                x1, y1 = p.astype(int)
-                cv2.circle(img, (x1, y1), 6, (0, 255, 0), 1)
+        re_proj1, _ = cv2.projectPoints(
+            points3d,
+            np.zeros_like(rvec),
+            np.zeros_like(tvec),
+            mtx,
+            distort,
+        )
+        render_points2d(img, re_proj1, 5, (0, 255, 0), 2)
 
-            points2d, _ = cv2.projectPoints(np.array(points3d), rvec, tvec, mtx, distort)
-            for p in points2d.reshape((-1, 2)):
-                x2, y2 = p.astype(int)
-                cv2.circle(img, (w + x2, y2), 6, (0, 255, 0), 1)
+        re_proj2, _ = cv2.projectPoints(points3d, rvec, tvec, mtx, distort)
+        render_points2d(img, re_proj2 + xshift, 5, (0, 255, 0), 2)
 
-            cv2.imshow("", img)
-            cv2.waitKey(0)
+        cv2.imshow("", img)
+        cv2.waitKey(0)
 
-        Rt_dict[(cam_id1, cam_id2)] = R, t
+        pose_dict[(cam_id1, cam_id2)] = R, t
 
-    print(Rt_dict)
+    print(pose_dict)
     #
     # Visualize
     #
@@ -283,12 +299,12 @@ def main(args):
             cam_id1 = all_cam_ids[j]
             key = cam_id1, cam_id2
 
-            if key in Rt_dict:
+            if key in pose_dict:
                 M0 = all_Rt[all_cam_ids[0]]
                 Mj = all_Rt[all_cam_ids[j]]
                 base = np.matmul(M0, np.linalg.inv(Mj))
 
-                R, t = Rt_dict[key]
+                R, t = pose_dict[key]
                 Rt = make_Rt(R, t, expand=True)
 
                 M = np.matmul(base, Rt)  # M0Mi
