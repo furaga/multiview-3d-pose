@@ -30,10 +30,6 @@ def main(args):
     obj_pt3d[:, :2] = np.mgrid[0:gw, 0:gh].T.reshape(-1, 2)
     obj_pt3d[:, :2] *= 0.02
 
-    # Arrays to store object points and image points from all the images.
-    points3d = {}  # 3d point in real world space
-    points2d = {}  # 2d points in image plane.
-
     all_video_paths = args.input_dir.glob("*.mp4")
     all_caps = {p.stem: cv2.VideoCapture(str(p)) for p in all_video_paths}
 
@@ -75,10 +71,6 @@ def main(args):
 
         if finish:
             break
-
-    # all_pts3d = all_pts3d[::16]
-    # all_pts2d = all_pts2d[::16]
-    # all_ids = all_ids[::16]
 
     print("Calibrating: # of data =", len(all_pts3d))
 
