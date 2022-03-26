@@ -91,7 +91,7 @@ def draw_points3d(ax, points3d, colors, world_size=0.5, center=None, block=True,
 
 
 def make_view_position(R, t):
-    p = -np.matmul(R, t.T).T
+    p = -np.matmul(R.T, t.T).T
     return p
 
 
@@ -124,7 +124,7 @@ def draw_camera(ax, R, t, id):
     for i in range(3):
         p0 = make_view_position(R, t)
         p = np.array([x[i], y[i], z[i]])
-        p = np.matmul(R, p.T).T + p0
+        p = np.matmul(R.T, p.T).T + p0
         ax.plot(
             [p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=c[i], ms=4, mew=0.5
         )
@@ -170,13 +170,11 @@ def load_correspondenses(board_dir, all_cam_ids):
                 if cam_id1 >= cam_id2:
                     continue
                 key = (cam_id1, cam_id2)
-                if key not in corr_dict:
-                    print(key, frame)
-                    corr_dict.setdefault(key, ([], []))
-                    corr_dict[key] = (
-                        corr_dict[key][0] + pts1,
-                        corr_dict[key][1] + pts2,
-                    )
+                corr_dict.setdefault(key, ([], []))
+                corr_dict[key] = (
+                    corr_dict[key][0] + pts1,
+                    corr_dict[key][1] + pts2,
+                )
 
     for k, (pts1, pts2) in corr_dict.items():
         pts1 = np.reshape(pts1, (-1, 2))
@@ -204,6 +202,7 @@ def render_points2d(img, points2d, radius, color, thickness):
 
 
 def main(args):
+    debug_show = True
     args.out_dir.mkdir(exist_ok=True)
 
     w, h = 640, 480
@@ -247,42 +246,39 @@ def main(args):
             points3d.append(pt3d)
 
         points3d = np.array(points3d)
-
-        # visualize
-        # visualize_reconstruction([
-        #     (np.eye(4), np.eye(3), np.zeros(3), cam_id1),
-        #     (E, R, t, cam_id2),
-        # ], points3d)
-
-        rvec, _ = cv2.Rodrigues(R)
-        tvec = t.ravel()
-        img = np.zeros((h, w * 2, 3), np.uint8)
-
-        xshift = np.array([[w, 0]])
-        render_points2d(img, pts1, 3, (255, 0, 0), -1)
-        render_points2d(img, pts2 + xshift, 3, (255, 0, 0), -1)
-
-        re_proj1, _ = cv2.projectPoints(
-            points3d,
-            np.zeros_like(rvec),
-            np.zeros_like(tvec),
-            mtx,
-            distort,
-        )
-        render_points2d(img, re_proj1, 5, (0, 255, 0), 2)
-
-        re_proj2, _ = cv2.projectPoints(points3d, rvec, tvec, mtx, distort)
-        render_points2d(img, re_proj2 + xshift, 5, (0, 255, 0), 2)
-
-        cv2.imshow("", img)
-        cv2.waitKey(0)
-
         pose_dict[(cam_id1, cam_id2)] = R, t
 
-    print(pose_dict)
-    #
-    # Visualize
-    #
+        # visualize
+        if debug_show:
+            visualize_reconstruction([
+                (np.eye(4), np.eye(3), np.zeros(3), cam_id1),
+                (E, R, t, cam_id2),
+            ], points3d)
+
+            rvec, _ = cv2.Rodrigues(R)
+            tvec = t.ravel()
+            img = np.zeros((h, w * 2, 3), np.uint8)
+
+            xshift = np.array([[w, 0]])
+            render_points2d(img, pts1, 3, (255, 0, 0), -1)
+            render_points2d(img, pts2 + xshift, 3, (255, 0, 0), -1)
+
+            re_proj1, _ = cv2.projectPoints(
+                points3d,
+                np.zeros_like(rvec),
+                np.zeros_like(tvec),
+                mtx,
+                distort,
+            )
+            render_points2d(img, re_proj1, 5, (0, 255, 0), 2)
+
+            re_proj2, _ = cv2.projectPoints(points3d, rvec, tvec, mtx, distort)
+            render_points2d(img, re_proj2 + xshift, 5, (0, 255, 0), 2)
+
+            cv2.imshow("", img)
+            cv2.waitKey(0)
+
+
     points3d = [np.zeros(3, float)]
     colors = [cam_id_colors[all_cam_ids[0]]]
 
@@ -308,8 +304,8 @@ def main(args):
                 Rt = make_Rt(R, t, expand=True)
 
                 M = np.matmul(base, Rt)  # M0Mi
-                global_R = R  # M[:3, :3]
-                global_t = t.ravel()  # M[:3, 3]
+                global_R = M[:3, :3]
+                global_t = M[:3, 3]
 
                 pt3d = make_view_position(global_R, global_t)
                 points3d.append(pt3d)
