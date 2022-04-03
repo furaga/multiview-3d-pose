@@ -186,11 +186,11 @@ def main(args):
                             (int(x1), int(y1)),
                             (int(x2), int(y2)),
                             kps_colors[a],
-                            3,
+                            2,
                         )
                 for i, (x, y, score) in enumerate(kps):
                     if score > args.threshold:
-                        cv2.circle(img, (int(x), int(y)), 3, kps_colors[i], -1)
+                        cv2.circle(img, (int(x), int(y)), 6, kps_colors[i], -1)
 
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
@@ -198,10 +198,15 @@ def main(args):
 
         h, w = img.shape[:2]
 
+        #
+        # Triangulate
+        #
         points3d = np.zeros((14, 3), float)
         for i in range(14):
             points2d = []
             projs = []
+            
+            pairs = []
             for ci, cam_id in enumerate(all_cam_ids):
                 if all_kps[cam_id] is None:
                     continue
@@ -213,6 +218,7 @@ def main(args):
                 points2d.append((kx, ky))
                 proj = np.matmul(mtx, pose_dict[cam_id][:3])
                 projs.append(proj)
+                pairs.append(cam_id)
 
             if len(points2d) >= 2:
                 pts_undist = geometry.undistort(points2d, mtx, distort)
@@ -220,12 +226,31 @@ def main(args):
                     np.array(pts_undist), np.array(projs)
                 )
                 points3d[i] = pt3d
+                if i == 0:
+                    print(f"kp{i}:", pairs)
+                    print("  ", pts_undist)
+                    print("  ", projs)
+                    print("  ", pt3d)
+
+        #
+        # Debug Draw
+        #
+
+        for ci, cam_id in enumerate(all_cam_ids):
+            img = all_imgs[ci]
+            Rt = pose_dict[cam_id]
+            rvec, _ = cv2.Rodrigues(Rt[:3, :3])
+            tvec = Rt[:3, 3].ravel()
+            re_points2d, _ = cv2.projectPoints(points3d, rvec, tvec, mtx, distort)
+            re_points2d = re_points2d.reshape((-1, 2))
+            for i, (x, y) in enumerate(re_points2d):
+                if 0 < x < w and 0 < y < h:
+                    cv2.circle(img, (int(x), int(y)), 8, kps_colors[i], 2)
 
         if is_draw:
             draw_center = draw_points3d(
                 ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64
             )
-
             for a, b in skeleton:
                 if a >= 14 or b >= 14:
                     continue
