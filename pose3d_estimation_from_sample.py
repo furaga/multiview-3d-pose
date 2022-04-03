@@ -90,6 +90,21 @@ def draw_camera(ax, R, t, id, size=1):
         ax.text(p0[0], p0[1], p0[2], id, None)
 
 
+# 0: 'left_shoulder',
+# 1: 'right_shoulder',
+# 2: 'left_elbow',
+# 3: 'right_elbow',
+# 4: 'left_wrist',
+# 5: 'right_wrist',
+# 6: 'left_hip',
+# 7: 'right_hip',
+# 8: 'left_knee',
+# 9: 'right_knee',
+# 10: 'left_ankle',
+# 11: 'right_ankle',
+# 12: 'top_head',
+# 13: 'neck'
+
 skeleton = [
     [0, 2],
     [2, 4],
@@ -160,10 +175,6 @@ def main(args):
             # Draw the pose annotation on the image.
             img.flags.writeable = True
             if kps is not None:
-                for i, (x, y, score) in enumerate(kps):
-                    if score > args.threshold:
-                        cv2.circle(img, (int(x), int(y)), 3, kps_colors[i], -1)
-
                 for a, b in skeleton:
                     if a >= 14 or b >= 14:
                         continue
@@ -177,6 +188,9 @@ def main(args):
                             kps_colors[a],
                             3,
                         )
+                for i, (x, y, score) in enumerate(kps):
+                    if score > args.threshold:
+                        cv2.circle(img, (int(x), int(y)), 3, kps_colors[i], -1)
 
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
@@ -200,21 +214,22 @@ def main(args):
                 proj = np.matmul(mtx, pose_dict[cam_id][:3])
                 projs.append(proj)
 
-            if len(points2d) >= 4:
+            if len(points2d) >= 2:
                 pts_undist = geometry.undistort(points2d, mtx, distort)
-                pt3d = geometry.triangulate_nviews(np.array(pts_undist), np.array(projs))
+                pt3d = geometry.triangulate_nviews(
+                    np.array(pts_undist), np.array(projs)
+                )
                 points3d[i] = pt3d
 
         if is_draw:
-            draw_center = draw_points3d(ax, points3d, kps_colors_plt, s=32)
+            draw_center = draw_points3d(
+                ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64
+            )
 
             for a, b in skeleton:
                 if a >= 14 or b >= 14:
                     continue
-                if (
-                    all_kps[cam_id][a][2] > args.threshold
-                    and all_kps[cam_id][b][2] > args.threshold
-                ):
+                if np.any(points3d[a] != 0) and np.any(points3d[b] != 0):
                     x1, y1, z1 = points3d[a]
                     x1 -= draw_center[0]
                     y1 -= draw_center[1]
@@ -223,7 +238,7 @@ def main(args):
                     x2 -= draw_center[0]
                     y2 -= draw_center[1]
                     z2 -= draw_center[2]
-                    print([x1, x2], [y1, y2], [z1, z2])
+                    #  print(a, b, "|", [x1, x2], [y1, y2], [z1, z2])
                     ax.plot(
                         [x1, x2],
                         [y1, y2],
@@ -231,7 +246,7 @@ def main(args):
                         "o-",
                         c=kps_colors_plt[a],
                         ms=0,
-                        mew=2,
+                        mew=1,
                     )
 
         show_img = cv2.vconcat(
