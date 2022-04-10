@@ -1,6 +1,7 @@
 import argparse
 from email.mime import image
 from json import load
+from operator import index
 import numpy as np
 import cv2
 import glob
@@ -154,9 +155,11 @@ def main(args):
 
     finish = False
     i_frame = 0
+    
+    rows = []
     while not finish:
         i_frame += 1
-        is_draw = i_frame % 1 == 0
+        is_draw = i_frame % 30000 == 0
         if is_draw:
             ax = new_plt(world_size=1)
 
@@ -199,6 +202,9 @@ def main(args):
 
             all_imgs.append(img)
 
+        if img is None:
+            break
+
         h, w = img.shape[:2]
 
         #
@@ -232,6 +238,9 @@ def main(args):
                 )
                 if ret:
                     points3d[i] = pt3d
+
+        row = [i_frame] + list(points3d.ravel())
+        rows.append(row)
 
         #
         # Debug Draw
@@ -297,12 +306,15 @@ def main(args):
                     continue
                 points = [[x, y]]
                 p0, dirs = geometry.calc_rays(points, Rt[:3], mtx, distort)
-                draw_ray(ax, p0, dirs[0])
+                # draw_ray(ax, p0, dirs[0])
 
             show_plt(True)
 
     for cap in all_caps:
         cap.release()
+        
+    df = pd.DataFrame(rows)
+    df.to_csv("keypoints3d.csv", header=None, index=None)
 
 
 if __name__ == "__main__":
