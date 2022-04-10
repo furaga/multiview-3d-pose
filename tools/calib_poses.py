@@ -297,9 +297,11 @@ def main(args):
 
                 draw_camera(ax, global_R, global_t, cam_id2, size=0.5)
 
-        all_Rt[all_cam_ids[i]] = np.mean(global_Rts, axis=0)
+        all_Rt[all_cam_ids[i]] = global_Rts[0] # np.mean(global_Rts, axis=0)
 
     print(all_Rt)
+    
+    print("KEYS", list(pose_dict.keys()))
 
     show_plt(True)
 

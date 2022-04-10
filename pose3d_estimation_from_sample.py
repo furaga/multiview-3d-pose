@@ -49,8 +49,6 @@ def draw_points3d(ax, points3d, colors, center=None, s=8):
     y = points3d[:, 1] - mean[1]
     z = points3d[:, 2] - mean[2]
     ax.scatter(x, y, z, c=colors, s=s)
-    print(x, y, z, mean)
-    print("===")
     return mean
 
 
@@ -88,6 +86,11 @@ def draw_camera(ax, R, t, id, size=1):
             [p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=c[i], ms=4, mew=0.5
         )
         ax.text(p0[0], p0[1], p0[2], id, None)
+
+
+def draw_ray(ax, p0, dir, color=(0, 0, 0), length=3):
+    p = p0 + dir * length
+    ax.plot([p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=color, ms=4, mew=0.5)
 
 
 # 0: 'left_shoulder',
@@ -130,7 +133,7 @@ def main(args):
 
     all_video_paths = [args.video_dir / f"{name}.mp4" for name in pose_dict]
     for p in all_video_paths:
-        assert p.exists()
+        assert p.exists(), str(p)
 
     all_cam_ids = [p.stem for p in all_video_paths]
     all_caps = [cv2.VideoCapture(str(p)) for p in all_video_paths]
@@ -205,7 +208,7 @@ def main(args):
         for i in range(14):
             points2d = []
             projs = []
-            
+
             pairs = []
             for ci, cam_id in enumerate(all_cam_ids):
                 if all_kps[cam_id] is None:
@@ -222,15 +225,13 @@ def main(args):
 
             if len(points2d) >= 2:
                 pts_undist = geometry.undistort(points2d, mtx, distort)
-                pt3d = geometry.triangulate_nviews(
+
+                print(f"[kp{i}]")
+                ret, pt3d = geometry.triangulate_nviews_by2(
                     np.array(pts_undist), np.array(projs)
                 )
-                points3d[i] = pt3d
-                if i == 0:
-                    print(f"kp{i}:", pairs)
-                    print("  ", pts_undist)
-                    print("  ", projs)
-                    print("  ", pt3d)
+                if ret:
+                    points3d[i] = pt3d
 
         #
         # Debug Draw
@@ -263,7 +264,6 @@ def main(args):
                     x2 -= draw_center[0]
                     y2 -= draw_center[1]
                     z2 -= draw_center[2]
-                    #  print(a, b, "|", [x1, x2], [y1, y2], [z1, z2])
                     ax.plot(
                         [x1, x2],
                         [y1, y2],
@@ -274,6 +274,7 @@ def main(args):
                         mew=1,
                     )
 
+        # all_imgs.append(np.zeros_like(all_imgs[0]))
         show_img = cv2.vconcat(
             [
                 cv2.hconcat(all_imgs[:2]),
@@ -287,6 +288,16 @@ def main(args):
         if is_draw:
             for cam_id, Rt in pose_dict.items():
                 draw_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
+
+            for cam_id, Rt in pose_dict.items():
+                if all_kps[cam_id] is None:
+                    continue
+                x, y, score = all_kps[cam_id][2] # left elbow
+                if score <= args.threshold:
+                    continue
+                points = [[x, y]]
+                p0, dirs = geometry.calc_rays(points, Rt[:3], mtx, distort)
+                draw_ray(ax, p0, dirs[0])
 
             show_plt(True)
 

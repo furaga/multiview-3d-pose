@@ -13,7 +13,9 @@ def normalize(vec):
     return vec / np.linalg.norm(vec)
 
 
-def triangulate_nviews(points2d: np.ndarray, proj_mats: np.ndarray) -> np.ndarray:
+def triangulate_nviews(
+    points2d: np.ndarray, proj_mats: np.ndarray, show_error=False
+) -> np.ndarray:
     assert points2d.shape[1] == 2
     nviews = points2d.shape[0]
     assert nviews == len(proj_mats)
@@ -30,7 +32,54 @@ def triangulate_nviews(points2d: np.ndarray, proj_mats: np.ndarray) -> np.ndarra
     _, _, VT = cv2.SVDecomp(A)
     x_alphas = VT[-1]
     x = x_alphas[:3] / x_alphas[3]
+
     return x
+
+
+def calc_trianglate_error(points2d, proj_mats, x):
+    errs = []
+    for pt2d, proj in zip(points2d, proj_mats):
+        v = np.array([*x, 1], float).T
+        reproj = np.matmul(proj, v).ravel()
+        reproj = reproj[:2] / reproj[2]
+        err = np.linalg.norm(pt2d - reproj)
+        errs.append(err)
+    return errs
+
+
+def triangulate_nviews_by2(points2d: np.ndarray, proj_mats: np.ndarray) -> np.ndarray:
+    n = len(points2d)
+
+    points3d = []
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            p = triangulate_nviews(
+                np.take(points2d, [i, j], axis=0),
+                np.take(proj_mats, [i, j], axis=0),
+                True,
+            )
+            errs = calc_trianglate_error(points2d, proj_mats, p)
+            points3d.append(p)
+
+    if len(points3d) <= 0:
+        return False, None
+
+    x = np.mean(points3d, axis=0)
+
+    errs = []
+    for pt2d, proj in zip(points2d, proj_mats):
+        v = np.array([*x, 1], float).T
+        reproj = np.matmul(proj, v).ravel()
+        reproj = reproj[:2] / reproj[2]
+        err = np.linalg.norm(pt2d - reproj)
+        errs.append(err)
+
+    print("-----")
+    print("by2: errors:", errs)
+    print("by2: mean of errors:", np.mean(errs))
+    print("-----")
+
+    return True, x
 
 
 def calc_depth(pose, X):
