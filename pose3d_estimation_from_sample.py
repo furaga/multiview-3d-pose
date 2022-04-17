@@ -90,6 +90,26 @@ def draw_skeleton2d(img, kps, kps_colors):
                 cv2.circle(img, (int(x), int(y)), 6, kps_colors[i], -1)
 
 
+def plot_skeleton3d(ax, points3d, kps_colors_plt):
+    # keypoints
+    visualize.plot_points3d(ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64)
+
+    # bones
+    for a, b in skeleton:
+        if np.any(points3d[a] != 0) and np.any(points3d[b] != 0):
+            x1, y1, z1 = points3d[a]
+            x2, y2, z2 = points3d[b]
+            ax.plot(
+                [x1, x2],
+                [y1, y2],
+                [z1, z2],
+                "o-",
+                c=kps_colors_plt[a],
+                ms=0,
+                mew=1,
+            )
+
+
 def main(args):
     pose_dict = calib_result.pose_dict
     mtx = calib_result.camera_matrix
@@ -120,13 +140,11 @@ def main(args):
     rows = []
     while not finish:
         i_frame += 1
+        is_draw3d = i_frame % 300 == 0
 
-        is_draw = i_frame % 30000 == 0
-        if is_draw:
-            ax = visualize.create_plt(world_size=1)
-
-        all_kps = {}
+        # Images and Keypoints
         all_imgs = {}
+        all_kps = {}
         for cam_id, cap in zip(all_cam_ids, all_caps):
             ret, img = cap.read()
             if not ret:
@@ -150,84 +168,37 @@ def main(args):
         for i in range(14):
             points2d = []
             projs = []
-
-            pairs = []
-            for ci, cam_id in enumerate(all_cam_ids):
+            for cam_id in all_cam_ids:
                 if all_kps[cam_id] is None:
                     continue
                 x, y, score = all_kps[cam_id][i]
                 if score <= args.threshold:
                     continue
-                kx = x
-                ky = y
-                points2d.append((kx, ky))
-                proj = np.matmul(mtx, pose_dict[cam_id][:3])
-                projs.append(proj)
-                pairs.append(cam_id)
+                points2d.append((x, y))
+                projs.append(np.matmul(mtx, pose_dict[cam_id][:3]))
 
             if len(points2d) >= 2:
                 pts_undist = geometry.undistort(points2d, mtx, distort)
-
-                print(f"[kp{i}]")
-                ret, pt3d = geometry.triangulate_nviews_by2(
-                    np.array(pts_undist), np.array(projs)
-                )
+                ret, pt3d = geometry.triangulate_nviews_by2(pts_undist, np.array(projs))
                 if ret:
                     points3d[i] = pt3d
 
+        # Add Rows to Save
         row = [i_frame] + list(points3d.ravel())
         rows.append(row)
 
-        # Draw Skeletons on Images
+        # Draw 3D
+        if is_draw3d:
+            ax = visualize.create_plt(world_size=1)
+            plot_skeleton3d(ax, points3d, kps_colors_plt)
+            for cam_id, Rt in pose_dict.items():
+                visualize.plot_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
+            visualize.show_plt(True)
+
+        # Draw 2D
         for cam_id, cap in zip(all_cam_ids, all_caps):
-            kps = all_kps[cam_id]
-            img = all_imgs[cam_id]
-            cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            draw_skeleton2d(img, kps, kps_colors)
-            cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            draw_skeleton2d(all_imgs[cam_id], all_kps[cam_id], kps_colors)
 
-        #
-        # Debug Draw
-        #
-
-        for ci, cam_id in enumerate(all_cam_ids):
-            img = all_imgs[cam_id]
-            Rt = pose_dict[cam_id]
-            rvec, _ = cv2.Rodrigues(Rt[:3, :3])
-            tvec = Rt[:3, 3].ravel()
-            re_points2d, _ = cv2.projectPoints(points3d, rvec, tvec, mtx, distort)
-            re_points2d = re_points2d.reshape((-1, 2))
-            for i, (x, y) in enumerate(re_points2d):
-                if 0 < x < w and 0 < y < h:
-                    cv2.circle(img, (int(x), int(y)), 8, kps_colors[i], 2)
-
-        if is_draw:
-            draw_center = visualize.plot_points3d(
-                ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64
-            )
-            for a, b in skeleton:
-                if a >= 14 or b >= 14:
-                    continue
-                if np.any(points3d[a] != 0) and np.any(points3d[b] != 0):
-                    x1, y1, z1 = points3d[a]
-                    x1 -= draw_center[0]
-                    y1 -= draw_center[1]
-                    z1 -= draw_center[2]
-                    x2, y2, z2 = points3d[b]
-                    x2 -= draw_center[0]
-                    y2 -= draw_center[1]
-                    z2 -= draw_center[2]
-                    ax.plot(
-                        [x1, x2],
-                        [y1, y2],
-                        [z1, z2],
-                        "o-",
-                        c=kps_colors_plt[a],
-                        ms=0,
-                        mew=1,
-                    )
-
-        # all_imgs.append(np.zeros_like(all_imgs[0]))
         all_imgs_ls = [all_imgs[cam_id] for cam_id in all_cam_ids]
         show_img = cv2.vconcat(
             [
@@ -238,22 +209,6 @@ def main(args):
         cv2.imshow(f"Cameras", show_img)
         if cv2.waitKey(1) == ord("q"):
             finish = True
-
-        if is_draw:
-            for cam_id, Rt in pose_dict.items():
-                visualize.plot_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
-
-            for cam_id, Rt in pose_dict.items():
-                if all_kps[cam_id] is None:
-                    continue
-                x, y, score = all_kps[cam_id][2]  # left elbow
-                if score <= args.threshold:
-                    continue
-                points = [[x, y]]
-                p0, dirs = geometry.calc_rays(points, Rt[:3], mtx, distort)
-                # plot_ray(ax, p0, dirs[0])
-
-            visualize.show_plt(True)
 
     for cap in all_caps:
         cap.release()
