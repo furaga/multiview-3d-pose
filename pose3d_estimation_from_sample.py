@@ -11,7 +11,8 @@ import random
 import matplotlib.pyplot as plt
 import mediapipe as mp
 
-import tools.geometry as geometry
+import lib.geometry as geometry
+import lib.visualize as visualize
 import tools.calib.result as calib_result
 
 
@@ -22,35 +23,6 @@ def parse_args():
     parser.add_argument("--threshold", type=float, default=0.3)
     args = parser.parse_args()
     return args
-
-
-def new_plt(world_size=0.5):
-    fig = plt.figure(figsize=(9, 9))
-    ax = fig.add_subplot(111, projection="3d")
-    ax.set_title("3D Points")
-    ax.set_xlim(-world_size, world_size)
-    ax.set_ylim(-world_size, world_size)
-    ax.set_zlim(-world_size, world_size)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    return ax
-
-
-def show_plt(block=True):
-    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    plt.show(block=block)
-
-
-def draw_points3d(ax, points3d, colors, center=None, s=8):
-    points3d = np.array(points3d)
-    colors = np.array(colors)
-    mean = center if center is not None else np.mean(points3d, axis=0)
-    x = points3d[:, 0] - mean[0]
-    y = points3d[:, 1] - mean[1]
-    z = points3d[:, 2] - mean[2]
-    ax.scatter(x, y, z, c=colors, s=s)
-    return mean
 
 
 def load_poses(json_dir):
@@ -67,31 +39,6 @@ def load_poses(json_dir):
                 kps = np.reshape(kps, (-1, 3))
                 kps_dict[p.stem][person["i_frame"]] = kps
     return kps_dict
-
-
-def make_view_position(R, t):
-    p = -np.matmul(R.T, t.T).T
-    return p
-
-
-def draw_camera(ax, R, t, id, size=1):
-    x = [size, 0, 0]
-    y = [0, size, 0]
-    z = [0, 0, size]
-    c = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
-    for i in range(3):
-        p0 = make_view_position(R, t)
-        p = np.array([x[i], y[i], z[i]])
-        p = np.matmul(R.T, p.T).T + p0
-        ax.plot(
-            [p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=c[i], ms=4, mew=0.5
-        )
-        ax.text(p0[0], p0[1], p0[2], id, None)
-
-
-def draw_ray(ax, p0, dir, color=(0, 0, 0), length=3):
-    p = p0 + dir * length
-    ax.plot([p0[0], p[0]], [p0[1], p[1]], [p0[2], p[2]], "o-", c=color, ms=4, mew=0.5)
 
 
 # 0: 'left_shoulder',
@@ -155,13 +102,13 @@ def main(args):
 
     finish = False
     i_frame = 0
-    
+
     rows = []
     while not finish:
         i_frame += 1
         is_draw = i_frame % 30000 == 0
         if is_draw:
-            ax = new_plt(world_size=1)
+            ax = visualize.create_plt(world_size=1)
 
         all_kps = {}
         all_imgs = []
@@ -258,7 +205,7 @@ def main(args):
                     cv2.circle(img, (int(x), int(y)), 8, kps_colors[i], 2)
 
         if is_draw:
-            draw_center = draw_points3d(
+            draw_center = visualize.plot_points3d(
                 ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64
             )
             for a, b in skeleton:
@@ -296,23 +243,23 @@ def main(args):
 
         if is_draw:
             for cam_id, Rt in pose_dict.items():
-                draw_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
+                visualize.plot_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
 
             for cam_id, Rt in pose_dict.items():
                 if all_kps[cam_id] is None:
                     continue
-                x, y, score = all_kps[cam_id][2] # left elbow
+                x, y, score = all_kps[cam_id][2]  # left elbow
                 if score <= args.threshold:
                     continue
                 points = [[x, y]]
                 p0, dirs = geometry.calc_rays(points, Rt[:3], mtx, distort)
-                # draw_ray(ax, p0, dirs[0])
+                # plot_ray(ax, p0, dirs[0])
 
-            show_plt(True)
+            visualize.show_plt(True)
 
     for cap in all_caps:
         cap.release()
-        
+
     df = pd.DataFrame(rows)
     df.to_csv("keypoints3d.csv", header=None, index=None)
 

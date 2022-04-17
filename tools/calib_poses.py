@@ -62,7 +62,7 @@ def recoverPose(E, points1, points2, mtx):
     return True, best_Rt[0], best_Rt[1]
 
 
-def new_plt(world_size=0.5):
+def create_plt(world_size=0.5):
     fig = plt.figure(figsize=(9, 9))
     ax = fig.add_subplot(111, projection="3d")
     ax.set_title("3D Points")
@@ -80,7 +80,7 @@ def show_plt(block=True):
     plt.show(block=block)
 
 
-def draw_points3d(ax, points3d, colors, world_size=0.5, center=None, block=True, s=8):
+def plot_points3d(ax, points3d, colors, world_size=0.5, center=None, block=True, s=8):
     points3d = np.array(points3d)
     colors = np.array(colors)
     mean = center if center is not None else np.mean(points3d, axis=0)
@@ -104,7 +104,7 @@ def make_Rt(R, t, expand=False):
     return Rt
 
 
-def draw_camera(ax, R, t, id, size=1):
+def plot_camera(ax, R, t, id, size=1):
     x = [size, 0, 0]
     y = [0, size, 0]
     z = [0, 0, size]
@@ -171,11 +171,11 @@ def load_correspondenses(board_dir, all_cam_ids):
 
 
 def visualize_reconstruction(pose_infos, points3d):
-    ax = new_plt(world_size=1.5)
+    ax = create_plt(world_size=1.5)
     for E, R, t, label in pose_infos:
-        draw_camera(ax, R, t.ravel(), label)
+        plot_camera(ax, R, t.ravel(), label)
     colors = [(0.2, 0.2, 0.2) for _ in points3d]
-    draw_points3d(
+    plot_points3d(
         ax, points3d, colors, world_size=1.5, center=(0, 0, 0), block=True, s=8
     )
     show_plt(True)
@@ -271,8 +271,8 @@ def main(args):
     all_Rt = {}
     all_Rt[all_cam_ids[0]] = np.eye(4)
 
-    ax = new_plt(world_size=1.5)
-    draw_camera(ax, np.eye(3), np.zeros(3), all_cam_ids[0], size=0.5)
+    ax = create_plt(world_size=1.5)
+    plot_camera(ax, np.eye(3), np.zeros(3), all_cam_ids[0], size=0.5)
     for i in range(1, len(all_cam_ids)):
         cam_id2 = all_cam_ids[i]
         global_Rts = []
@@ -295,7 +295,7 @@ def main(args):
                 global_t = M[:3, 3]
                 global_Rts.append(make_Rt(global_R, global_t, expand=True))
 
-                draw_camera(ax, global_R, global_t, cam_id2, size=0.5)
+                plot_camera(ax, global_R, global_t, cam_id2, size=0.5)
 
         all_Rt[all_cam_ids[i]] = global_Rts[0] # np.mean(global_Rts, axis=0)
 

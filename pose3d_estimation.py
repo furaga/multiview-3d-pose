@@ -21,7 +21,7 @@ def parse_args():
     return args
 
 
-def new_plt(world_size=0.5):
+def create_plt(world_size=0.5):
     fig = plt.figure(figsize=(9, 9))
     ax = fig.add_subplot(111, projection="3d")
     ax.set_title("3D Points")
@@ -39,7 +39,7 @@ def show_plt(block=True):
     plt.show(block=block)
 
 
-def draw_points3d(ax, points3d, colors, center=None, s=8):
+def plot_points3d(ax, points3d, colors, center=None, s=8):
     points3d = np.array(points3d)
     colors = np.array(colors)
     mean = center if center is not None else np.mean(points3d, axis=0)
@@ -74,7 +74,7 @@ def main(args):
             i_frame += 1
             is_draw = i_frame % 30 == 0
             if is_draw:
-                ax = new_plt(world_size=10)
+                ax = create_plt(world_size=10)
             all_kps = {}
             all_imgs = []
             for cam_id, cap in zip(all_cam_ids, all_caps):
@@ -139,7 +139,7 @@ def main(args):
                     points3d[i] = pt3d
 
             if is_draw:
-                draw_points3d(ax, points3d, (1, 0, 0))
+                plot_points3d(ax, points3d, (1, 0, 0))
 
             show_img = cv2.vconcat(
                 [
