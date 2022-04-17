@@ -1,15 +1,10 @@
 import argparse
-from email.mime import image
-from json import load
-from operator import index
 import numpy as np
 import cv2
-import glob
 from pathlib import Path
 import pandas as pd
 import random
-import matplotlib.pyplot as plt
-import mediapipe as mp
+import random
 
 import lib.geometry as geometry
 import lib.visualize as visualize
@@ -74,6 +69,27 @@ skeleton = [
 ]
 
 
+def draw_skeleton2d(img, kps, kps_colors):
+    # Draw the pose annotation on the image.
+    if kps is not None:
+        for a, b in skeleton:
+            if a >= 14 or b >= 14:
+                continue
+            if kps[a][2] > args.threshold and kps[b][2] > args.threshold:
+                x1, y1 = kps[a][:2]
+                x2, y2 = kps[b][:2]
+                cv2.line(
+                    img,
+                    (int(x1), int(y1)),
+                    (int(x2), int(y2)),
+                    kps_colors[a],
+                    2,
+                )
+        for i, (x, y, score) in enumerate(kps):
+            if score > args.threshold:
+                cv2.circle(img, (int(x), int(y)), 6, kps_colors[i], -1)
+
+
 def main(args):
     pose_dict = calib_result.pose_dict
     mtx = calib_result.camera_matrix
@@ -87,8 +103,6 @@ def main(args):
     all_caps = [cv2.VideoCapture(str(p)) for p in all_video_paths]
 
     kps_dict = load_poses(args.sample_dir)
-
-    import random
 
     kps_colors = [
         (
@@ -106,48 +120,23 @@ def main(args):
     rows = []
     while not finish:
         i_frame += 1
+
         is_draw = i_frame % 30000 == 0
         if is_draw:
             ax = visualize.create_plt(world_size=1)
 
         all_kps = {}
-        all_imgs = []
+        all_imgs = {}
         for cam_id, cap in zip(all_cam_ids, all_caps):
             ret, img = cap.read()
             if not ret:
                 continue
-
-            img.flags.writeable = False
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            all_imgs[cam_id] = img
 
             kps = None
             if i_frame - 1 in kps_dict[cam_id]:
                 kps = kps_dict[cam_id][i_frame - 1]
             all_kps[cam_id] = kps
-
-            # Draw the pose annotation on the image.
-            img.flags.writeable = True
-            if kps is not None:
-                for a, b in skeleton:
-                    if a >= 14 or b >= 14:
-                        continue
-                    if kps[a][2] > args.threshold and kps[b][2] > args.threshold:
-                        x1, y1 = kps[a][:2]
-                        x2, y2 = kps[b][:2]
-                        cv2.line(
-                            img,
-                            (int(x1), int(y1)),
-                            (int(x2), int(y2)),
-                            kps_colors[a],
-                            2,
-                        )
-                for i, (x, y, score) in enumerate(kps):
-                    if score > args.threshold:
-                        cv2.circle(img, (int(x), int(y)), 6, kps_colors[i], -1)
-
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-            all_imgs.append(img)
 
         if img is None:
             break
@@ -189,12 +178,20 @@ def main(args):
         row = [i_frame] + list(points3d.ravel())
         rows.append(row)
 
+        # Draw Skeletons on Images
+        for cam_id, cap in zip(all_cam_ids, all_caps):
+            kps = all_kps[cam_id]
+            img = all_imgs[cam_id]
+            cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            draw_skeleton2d(img, kps, kps_colors)
+            cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
         #
         # Debug Draw
         #
 
         for ci, cam_id in enumerate(all_cam_ids):
-            img = all_imgs[ci]
+            img = all_imgs[cam_id]
             Rt = pose_dict[cam_id]
             rvec, _ = cv2.Rodrigues(Rt[:3, :3])
             tvec = Rt[:3, 3].ravel()
@@ -231,10 +228,11 @@ def main(args):
                     )
 
         # all_imgs.append(np.zeros_like(all_imgs[0]))
+        all_imgs_ls = [all_imgs[cam_id] for cam_id in all_cam_ids]
         show_img = cv2.vconcat(
             [
-                cv2.hconcat(all_imgs[:2]),
-                cv2.hconcat(all_imgs[2:]),
+                cv2.hconcat(all_imgs_ls[:2]),
+                cv2.hconcat(all_imgs_ls[2:]),
             ]
         )
         cv2.imshow(f"Cameras", show_img)
