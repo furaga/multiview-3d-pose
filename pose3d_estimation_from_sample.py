@@ -11,31 +11,6 @@ import lib.visualize as visualize
 import tools.calib.result as calib_result
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sample_dir", required=True, type=Path)
-    parser.add_argument("--video_dir", required=True, type=Path)
-    parser.add_argument("--threshold", type=float, default=0.3)
-    args = parser.parse_args()
-    return args
-
-
-def load_poses(json_dir):
-    import json
-
-    all_json_paths = json_dir.glob("*.json")
-    kps_dict = {}
-    for p in all_json_paths:
-        kps_dict.setdefault(p.stem, {})
-        with open(p) as f:
-            people = json.loads(f.read())
-            for person in people:
-                kps = person["keypoints"]
-                kps = np.reshape(kps, (-1, 3))
-                kps_dict[p.stem][person["i_frame"]] = kps
-    return kps_dict
-
-
 # 0: 'left_shoulder',
 # 1: 'right_shoulder',
 # 2: 'left_elbow',
@@ -67,6 +42,31 @@ skeleton = [
     [7, 9],
     [9, 11],
 ]
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sample_dir", required=True, type=Path)
+    parser.add_argument("--video_dir", required=True, type=Path)
+    parser.add_argument("--threshold", type=float, default=0.3)
+    args = parser.parse_args()
+    return args
+
+
+def load_poses(json_dir):
+    import json
+
+    all_json_paths = json_dir.glob("*.json")
+    kps_dict = {}
+    for p in all_json_paths:
+        kps_dict.setdefault(p.stem, {})
+        with open(p) as f:
+            people = json.loads(f.read())
+            for person in people:
+                kps = person["keypoints"]
+                kps = np.reshape(kps, (-1, 3))
+                kps_dict[p.stem][person["i_frame"]] = kps
+    return kps_dict
 
 
 def draw_skeleton2d(img, kps, kps_colors):
@@ -161,9 +161,7 @@ def main(args):
 
         h, w = img.shape[:2]
 
-        #
         # Triangulate
-        #
         points3d = np.zeros((14, 3), float)
         for i in range(14):
             points2d = []
@@ -210,11 +208,12 @@ def main(args):
         if cv2.waitKey(1) == ord("q"):
             finish = True
 
-    for cap in all_caps:
-        cap.release()
-
+    # Save Results
     df = pd.DataFrame(rows)
     df.to_csv("keypoints3d.csv", header=None, index=None)
+
+    for cap in all_caps:
+        cap.release()
 
 
 if __name__ == "__main__":
