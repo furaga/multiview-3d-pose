@@ -43,6 +43,7 @@ def load_color_range(color_name):
     colors = np.array(colors)
     lower = np.percentile(colors, 5, axis=0).astype(np.uint8)
     higher = np.percentile(colors, 95, axis=0).astype(np.uint8)
+    print(color_name, lower, higher)
     return lower, higher
 
 
@@ -105,9 +106,11 @@ class MarkerTracker:
         self.history = []
         self.is_tracking = False
         self.last_update_time = 0
+        self.center = None
+        self.radius = None
 
     def update(self, ret, center, radius, cur_time):
-        self.history.append((ret, center, radius, cur_time))
+        self.history.append((ret, np.array(center), radius, cur_time))
 
         if len(self.history) > self.N_BUFFER:
             self.history = self.history[-self.N_BUFFER :]
@@ -116,7 +119,7 @@ class MarkerTracker:
         self.update_tracking_state(cur_time)
         self.tracking(cur_time)
 
-        return ret, center, radius
+        return self.is_tracking, self.center, self.radius
 
     def update_tracking_state(self, cur_time):
         if self.is_tracking:
@@ -127,33 +130,50 @@ class MarkerTracker:
                 print("Finish Tracking", self.cam_id, self.marker_id)
         else:
             # Nフレームcenterがだいたい同じ場所にいたら追跡開始
-            n = 10
+            n = 30
             thr = 20
             if len(self.history) >= n:
                 ret_all = np.all([h[0] for h in self.history[-n:]], axis=0)
                 if not ret_all:
-                    return 
+                    return
                 cmin = np.min([h[1] for h in self.history[-n:]], axis=0)
                 cmax = np.max([h[1] for h in self.history[-n:]], axis=0)
                 d = cmax - cmin
                 if np.max(d) < thr:
                     self.is_tracking = True
+                    self.center = self.history[-1][1]
+                    self.radius = self.history[-1][2]
                     self.last_update_time = cur_time
                     print("Start Tracking", self.cam_id, self.marker_id)
 
     def tracking(self, cur_time):
-        pass
+        if not self.is_tracking:
+            return
 
+        ret, center, radius, cur_time = self.history[-1]
+        if not ret:
+            return
+
+        thr = 100
+        dist = np.linalg.norm(self.center - center)
+        if dist > thr:
+            return
+
+        self.last_update_time = cur_time
+
+        # 適当にフィルターする？
+        self.center = center
+        self.radius = radius
 
 
 def main(args):
     marker_colors = [
-        #        load_color_range("moss_green"),
-        load_color_range("yellow_green"),
-        # load_color_range("purple"),
+        # load_color_range("moss_green"),
+        # load_color_range("yellow_green"),
+        load_color_range("purple"),
         # load_color_range("green"),
         # load_color_range("blue"),
-        # load_color_range("orange"),
+        load_color_range("orange"),
     ]
 
     all_caps = [cv2.VideoCapture(i) for i in [0, 2, 3, 4]]
@@ -182,12 +202,14 @@ def main(args):
 
                 # Tracking
                 tr = trackers[cam_id][mi]
-                ret, center, radius = tr.update(ret, center, radius, cur_time)
+                ret_tr, center_tr, radius_tr = tr.update(ret, center, radius, cur_time)
 
                 c = hsv2bgr(higher)
                 c = (int(c[0]), int(c[1]), int(c[2]))
-                if ret:
-                    mask = cv2.circle(mask, center, radius, c, -1)
+                if ret_tr:
+                    mask = cv2.circle(mask, center_tr, radius_tr, c, -1)
+                elif ret:
+                    mask = cv2.circle(mask, center, radius, c, 2)
 
             imgs.append(img)
             masks.append(mask)
