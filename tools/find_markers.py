@@ -53,7 +53,7 @@ def find_marker(hsv_img, lower, higher):
     m = extract_color(hsv_img, lower, higher)
     _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    
+
     cv2.imshow("m", m)
 
     best = None
@@ -97,20 +97,77 @@ def tile_images(imgs):
     )
 
 
+class MarkerTracker:
+    def __init__(self, cam_id, marker_id):
+        self.cam_id = cam_id
+        self.marker_id = marker_id
+        self.N_BUFFER = 32
+        self.history = []
+        self.is_tracking = False
+        self.last_update_time = 0
+
+    def update(self, ret, center, radius, cur_time):
+        self.history.append((ret, center, radius, cur_time))
+
+        if len(self.history) > self.N_BUFFER:
+            self.history = self.history[-self.N_BUFFER :]
+        assert len(self.history) <= self.N_BUFFER
+
+        self.update_tracking_state(cur_time)
+        self.tracking(cur_time)
+
+        return ret, center, radius
+
+    def update_tracking_state(self, cur_time):
+        if self.is_tracking:
+            # N秒以上更新されなければ
+            n = 1.0
+            if cur_time - self.last_update_time > n:
+                self.is_tracking = False
+                print("Finish Tracking", self.cam_id, self.marker_id)
+        else:
+            # Nフレームcenterがだいたい同じ場所にいたら追跡開始
+            n = 10
+            thr = 20
+            if len(self.history) >= n:
+                ret_all = np.all([h[0] for h in self.history[-n:]], axis=0)
+                if not ret_all:
+                    return 
+                cmin = np.min([h[1] for h in self.history[-n:]], axis=0)
+                cmax = np.max([h[1] for h in self.history[-n:]], axis=0)
+                d = cmax - cmin
+                if np.max(d) < thr:
+                    self.is_tracking = True
+                    self.last_update_time = cur_time
+                    print("Start Tracking", self.cam_id, self.marker_id)
+
+    def tracking(self, cur_time):
+        pass
+
+
+
 def main(args):
     marker_colors = [
-        load_color_range("moss_green"),
+        #        load_color_range("moss_green"),
         load_color_range("yellow_green"),
-        load_color_range("purple"),
-        load_color_range("green"),
-        load_color_range("blue"),
-        load_color_range("orange"),
+        # load_color_range("purple"),
+        # load_color_range("green"),
+        # load_color_range("blue"),
+        # load_color_range("orange"),
     ]
 
     all_caps = [cv2.VideoCapture(i) for i in [0, 2, 3, 4]]
+
+    trackers = {
+        cam_id: [MarkerTracker(cam_id, mi) for mi, _ in enumerate(marker_colors)]
+        for cam_id, _ in enumerate(all_caps)
+    }
+    cur_time = 0
+
     while True:
         imgs = []
         masks = []
+        cur_time += 1 / 30
         for cam_id, cap in enumerate(all_caps):
             ret, img = cap.read()
             if not ret:
@@ -118,10 +175,15 @@ def main(args):
 
             img = cv2.blur(img, (4, 4))
             mask = np.zeros_like(img)
-            
+
             hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             for mi, (lower, higher) in enumerate(marker_colors):
                 ret, center, radius = find_marker(hsv_img, lower, higher)
+
+                # Tracking
+                tr = trackers[cam_id][mi]
+                ret, center, radius = tr.update(ret, center, radius, cur_time)
+
                 c = hsv2bgr(higher)
                 c = (int(c[0]), int(c[1]), int(c[2]))
                 if ret:
