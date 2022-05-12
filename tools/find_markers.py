@@ -57,9 +57,14 @@ def tile_images(imgs):
 
 
 def main(args):
-    blue = load_color_range("blue")
-    orange = load_color_range("orange")
-    marker_colors = [blue, orange]
+    marker_colors = [
+        load_color_range("moss_green"),
+        load_color_range("yellow_green"),
+        load_color_range("purple"),
+        load_color_range("green"),
+        load_color_range("blue"),
+        load_color_range("orange"),
+    ]
 
     all_caps = [cv2.VideoCapture(i) for i in [0, 2, 3, 4]]
     while True:
@@ -71,25 +76,51 @@ def main(args):
                 break
 
             img = cv2.blur(img, (4, 4))
+            img_area = img.shape[0] * img.shape[1]
 
             mask = np.zeros_like(img)
-            for lower, higher in marker_colors:
+            for mi, (lower, higher) in enumerate(marker_colors):
                 m = extract_color(img, lower, higher)
+                #if mi == 0:
+                #    cv2.imshow(f"m_{cam_id}", m)
                 _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
                 contours, _ = cv2.findContours(
                     m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
                 )
-                if len(contours) <= 0:
-                    continue
-                contour_areas = [cv2.contourArea(c) for c in contours]
-                largest = contours[np.argmax(contour_areas)]
 
-                (x, y), radius = cv2.minEnclosingCircle(largest)
-                center = (int(x), int(y))
-                radius = int(radius)
+                best = None
+                for c in contours:
+                    ca = cv2.contourArea(c)
+                    if ca > img_area * 0.01:
+                        continue
+
+                    (x, y), radius = cv2.minEnclosingCircle(c)
+                    center = (int(x), int(y))
+                    radius = int(radius)
+                    if radius > img.shape[0] * 0.05:
+                        continue
+
+                    if radius <= 2:
+                        continue
+
+                    ratio = ca / (np.pi * radius * radius)
+                    if ratio < 0.5:
+                        continue
+
+                    if best is None:
+                        best = ca, center, radius
+
+                    if best[0] < ca:
+                        best = ca, center, radius
+
                 c = hsv2bgr(higher)
                 c = (int(c[0]), int(c[1]), int(c[2]))
-                mask = cv2.circle(mask, center, radius, c, -1)
+                if best is not None:
+                    ca, center, radius = best
+                    ratio = ca / (np.pi * radius * radius)
+                    if mi == 1:
+                        print(cam_id, mi, "|", ratio)
+                    mask = cv2.circle(mask, center, radius, c, -1)
 
             imgs.append(img)
             masks.append(mask)
