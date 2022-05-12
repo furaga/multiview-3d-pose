@@ -13,15 +13,6 @@ def parse_args():
     return args
 
 
-def extract_color(img, col1, col2):
-    lower = np.min([col1, col2], axis=0)
-    upper = np.max([col1, col2], axis=0)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, lower, upper)
-    # print(lower, upper)
-    return mask
-
-
 def bgr2hsv(bgr):
     bgr = np.reshape(bgr, (1, 1, 3)).astype(np.uint8)
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -34,7 +25,15 @@ def hsv2bgr(hsv):
     return bgr.ravel()
 
 
+def extract_color(img, col1, col2):
+    lower = np.min([col1, col2], axis=0)
+    upper = np.max([col1, col2], axis=0)
+    mask = cv2.inRange(img, lower, upper)
+    return mask
+
+
 def load_color_range(color_name):
+    print("Load color", color_name)
     colors = []
     for img_path in Path("../sample/marker").glob(f"{color_name}*.png"):
         img = cv2.imread(str(img_path))
@@ -45,6 +44,48 @@ def load_color_range(color_name):
     lower = np.percentile(colors, 5, axis=0).astype(np.uint8)
     higher = np.percentile(colors, 95, axis=0).astype(np.uint8)
     return lower, higher
+
+
+def find_marker(hsv_img, lower, higher):
+    h, w = hsv_img.shape[:2]
+    img_area = h * w
+
+    m = extract_color(hsv_img, lower, higher)
+    _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    
+    cv2.imshow("m", m)
+
+    best = None
+    for c in contours:
+        ca = cv2.contourArea(c)
+        if ca > img_area * 0.01:
+            continue
+
+        (x, y), radius = cv2.minEnclosingCircle(c)
+        center = (int(x), int(y))
+        radius = int(radius)
+        if radius > hsv_img.shape[0] * 0.05:
+            continue
+
+        if radius <= 2:
+            continue
+
+        ratio = ca / (np.pi * radius * radius)
+        if ratio < 0.5:
+            continue
+
+        if best is None:
+            best = ca, center, radius
+
+        if best[0] < ca:
+            best = ca, center, radius
+
+    if best is not None:
+        ca, center, radius = best
+        return True, center, radius
+
+    return False, None, None
 
 
 def tile_images(imgs):
@@ -76,50 +117,14 @@ def main(args):
                 break
 
             img = cv2.blur(img, (4, 4))
-            img_area = img.shape[0] * img.shape[1]
-
             mask = np.zeros_like(img)
+            
+            hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             for mi, (lower, higher) in enumerate(marker_colors):
-                m = extract_color(img, lower, higher)
-                #if mi == 0:
-                #    cv2.imshow(f"m_{cam_id}", m)
-                _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
-                contours, _ = cv2.findContours(
-                    m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-                )
-
-                best = None
-                for c in contours:
-                    ca = cv2.contourArea(c)
-                    if ca > img_area * 0.01:
-                        continue
-
-                    (x, y), radius = cv2.minEnclosingCircle(c)
-                    center = (int(x), int(y))
-                    radius = int(radius)
-                    if radius > img.shape[0] * 0.05:
-                        continue
-
-                    if radius <= 2:
-                        continue
-
-                    ratio = ca / (np.pi * radius * radius)
-                    if ratio < 0.5:
-                        continue
-
-                    if best is None:
-                        best = ca, center, radius
-
-                    if best[0] < ca:
-                        best = ca, center, radius
-
+                ret, center, radius = find_marker(hsv_img, lower, higher)
                 c = hsv2bgr(higher)
                 c = (int(c[0]), int(c[1]), int(c[2]))
-                if best is not None:
-                    ca, center, radius = best
-                    ratio = ca / (np.pi * radius * radius)
-                    if mi == 1:
-                        print(cam_id, mi, "|", ratio)
+                if ret:
                     mask = cv2.circle(mask, center, radius, c, -1)
 
             imgs.append(img)
