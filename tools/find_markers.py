@@ -15,7 +15,7 @@ def parse_args():
 
 def bgr2hsv(bgr):
     bgr = np.reshape(bgr, (1, 1, 3)).astype(np.uint8)
-    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
     return hsv.ravel()
 
 
@@ -32,18 +32,27 @@ def extract_color(img, col1, col2):
     return mask
 
 
-def load_color_range(color_name):
+def load_color_range(color_name, low_thr, high_thr):
     print("Load color", color_name)
     colors = []
-    for img_path in Path("../sample/marker").glob(f"{color_name}*.png"):
+
+    all_img_paths = Path(f"../sample/marker/{color_name}").glob("*.png")
+    for img_path in all_img_paths:
         img = cv2.imread(str(img_path))
-        colors += [
-            bgr2hsv(c) for c in img.reshape((-1, 3)) if np.any(c != np.zeros_like(c))
-        ]
+        h, w = img.shape[:2]
+        cx, cy = w // 2, h // 2
+        radius = min(w, h) / 2 * 0.8
+        for y in range(h):
+            for x in range(w):
+                dist_sq = (cx - x) ** 2 + (cy - y) ** 2
+                if dist_sq <= radius * radius:
+                    colors.append(bgr2hsv(img[y, x]))
+
     colors = np.array(colors)
-    lower = np.percentile(colors, 5, axis=0).astype(np.uint8)
-    higher = np.percentile(colors, 95, axis=0).astype(np.uint8)
+    lower = np.percentile(colors, low_thr, axis=0).astype(np.uint8)
+    higher = np.percentile(colors, high_thr, axis=0).astype(np.uint8)
     print(color_name, lower, higher)
+
     return lower, higher
 
 
@@ -54,8 +63,6 @@ def find_marker(hsv_img, lower, higher):
     m = extract_color(hsv_img, lower, higher)
     _, m = cv2.threshold(m, 128, 255, cv2.THRESH_BINARY)
     contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-
-    cv2.imshow("m", m)
 
     best = None
     for c in contours:
@@ -73,7 +80,7 @@ def find_marker(hsv_img, lower, higher):
             continue
 
         ratio = ca / (np.pi * radius * radius)
-        if ratio < 0.5:
+        if ratio < 0.4:
             continue
 
         if best is None:
@@ -84,9 +91,9 @@ def find_marker(hsv_img, lower, higher):
 
     if best is not None:
         ca, center, radius = best
-        return True, center, radius
+        return True, center, radius, m
 
-    return False, None, None
+    return False, None, None, m
 
 
 def tile_images(imgs):
@@ -168,12 +175,12 @@ class MarkerTracker:
 
 def main(args):
     marker_colors = [
-        # load_color_range("moss_green"),
-        # load_color_range("yellow_green"),
-        load_color_range("purple"),
-        # load_color_range("green"),
-        # load_color_range("blue"),
-        load_color_range("orange"),
+        load_color_range("moss_green", 10, 95),
+        load_color_range("yellow_green", 15, 85),
+        load_color_range("purple", 10, 90),
+        load_color_range("green", 10, 90),
+        # load_color_range("blue", 10, 90),
+        load_color_range("orange", 14, 92),
     ]
 
     all_caps = [cv2.VideoCapture(i) for i in [0, 2, 3, 4]]
@@ -187,6 +194,7 @@ def main(args):
     while True:
         imgs = []
         masks = []
+        raw_masks = []
         cur_time += 1 / 30
         for cam_id, cap in enumerate(all_caps):
             ret, img = cap.read()
@@ -195,17 +203,19 @@ def main(args):
 
             img = cv2.blur(img, (4, 4))
             mask = np.zeros_like(img)
+            raw_mask = np.zeros((img.shape[0], img.shape[1]), np.uint8)
 
-            hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
             for mi, (lower, higher) in enumerate(marker_colors):
-                ret, center, radius = find_marker(hsv_img, lower, higher)
+                ret, center, radius, m = find_marker(hsv_img, lower, higher)
+                raw_mask += m
 
                 # Tracking
                 tr = trackers[cam_id][mi]
                 ret_tr, center_tr, radius_tr = tr.update(ret, center, radius, cur_time)
 
                 c = hsv2bgr(higher)
-                c = (int(c[0]), int(c[1]), int(c[2]))
+                c = (int(c[2]), int(c[1]), int(c[0]))
                 if ret_tr:
                     mask = cv2.circle(mask, center_tr, radius_tr, c, -1)
                 elif ret:
@@ -213,9 +223,11 @@ def main(args):
 
             imgs.append(img)
             masks.append(mask)
+            raw_masks.append(raw_mask)
 
         cv2.imshow("img", tile_images(imgs))
         cv2.imshow("mask", tile_images(masks))
+        cv2.imshow("raw_masks", tile_images(raw_masks))
         if ord("q") == cv2.waitKey(1):
             break
 
