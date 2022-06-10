@@ -12,7 +12,10 @@ import random
 import matplotlib.pyplot as plt
 
 import lib.geometry
+import lib.visualize
 
+gw, gh = 9, 7
+# gw, gh = 10, 7
 w, h = 640, 480
 mtx = np.array(
     [
@@ -155,9 +158,6 @@ def calc_colors(all_cam_ids):
     return cam_id_colors
 
 
-gw, gh = 10, 7
-
-
 def search_checkerboard(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     flags = cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_EXHAUSTIVE
@@ -181,6 +181,7 @@ def calc_correspondenses(all_caps):
         frame += 1
 
         all_imgs = []
+        boards = {}
         for cam_id, cap in all_caps.items():
             ret, img = cap.read()
             if not ret:
@@ -191,8 +192,7 @@ def calc_correspondenses(all_caps):
                 all_imgs.append(img)
                 continue
             img = cv2.drawChessboardCorners(img, (gw, gh), pt2d, ret)
-            frame_to_dict.setdefault(frame, {})
-            frame_to_dict[frame].setdefault(cam_id, []).append(pt2d)
+            boards.setdefault(cam_id, []).append(pt2d)
             all_imgs.append(img)
 
         show_img = cv2.vconcat(
@@ -207,10 +207,12 @@ def calc_correspondenses(all_caps):
         if ord("q") == cv2.waitKey(1):
             exit(0)
 
-        if frame in frame_to_dict and len(frame_to_dict[frame]) >= 2:
-            for cam_id, _ in frame_to_dict[frame].items():
-                all_cam_counters.setdefault(cam_id, 0)
-                all_cam_counters[cam_id] += 1
+        if len(boards) >= 2:
+            if list(all_caps.keys())[0] in boards.keys():
+                for cam_id, _ in boards.items():
+                    all_cam_counters.setdefault(cam_id, 0)
+                    all_cam_counters[cam_id] += 1
+                frame_to_dict[frame] = boards
 
         enough = np.all([cnt >= 10 for _, cnt in all_cam_counters.items()])
         print(all_cam_counters)
@@ -323,6 +325,12 @@ def main(args):
     args.out_dir.mkdir(exist_ok=True)
 
     all_cam_ids = [0, 2, 3, 4]
+    # all_cam_ids = [
+    #     "data/Recorded-Checkerboard/camera_0.mp4",
+    #     "data/Recorded-Checkerboard/camera_2.mp4",
+    #     "data/Recorded-Checkerboard/camera_3.mp4",
+    #     "data/Recorded-Checkerboard/camera_4.mp4",
+    # ]
     all_caps = {c: cv2.VideoCapture(c) for c in all_cam_ids}
     cam_id_colors = calc_colors(all_cam_ids)
 
@@ -334,7 +342,11 @@ def main(args):
 
     print(all_Rt)
 
-    show_plt(True)
+    # visualize
+    ax = lib.visualize.create_plt(world_size=1)
+    for cam_id, Rt in all_Rt.items():
+        lib.visualize.plot_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
+    lib.visualize.show_plt(True)
 
 
 if __name__ == "__main__":
