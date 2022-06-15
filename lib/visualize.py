@@ -18,6 +18,29 @@ def create_plt(world_size=0.5):
     return ax
 
 
+def anim_create():
+    fig = plt.figure(figsize=(9, 9))
+    ax = fig.add_subplot(111, projection="3d")
+    return ax
+
+
+def anim_begin_update(ax, world_size=0.5):
+    ax.cla()
+    ax.set_title("3D Points")
+    ax.set_xlim(-world_size, world_size)
+    ax.set_ylim(-world_size, world_size)
+    ax.set_zlim(-world_size, world_size)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+
+def anim_end_update(ax, interval=1e-3):
+    fig = ax.figure
+    fig.canvas.draw_idle()
+    fig.canvas.start_event_loop(interval)
+
+
 def show_plt(block=True):
     plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
     plt.show(block=block)
