@@ -111,6 +111,37 @@ def plot_skeleton3d(ax, points3d, kps_colors_plt):
             )
 
 
+# TODO
+def tracking(tracking_points3d, points3d):
+    prev = tracking_points3d.copy()
+    tracking_points3d = points3d.copy()
+
+    edges = {}
+    for a, b in skeleton:
+        edges.setdefault(a, []).append(b)
+        edges.setdefault(b, []).append(a)
+
+    while True:
+        modified = False
+        for i, kp in enumerate(tracking_points3d):
+            if np.any(kp != 0):
+                continue
+            modified = True
+            pts = []
+            for t in edges[i]:
+                t_kp = tracking_points3d[t]
+                if np.all(t_kp == 0):
+                    continue
+                pts.append(t_kp + prev[i] - prev[t])
+            new_kp = np.mean(pts, axis=0)
+            tracking_points3d[i] = new_kp
+
+        if modified == False:
+            break
+
+    return tracking_points3d
+
+
 def main(args):
     movenet = MoveNet(args.model_select)
 
@@ -142,6 +173,9 @@ def main(args):
     visualize.show_plt(False)
 
     rows = []
+
+    tracking_points3d = np.zeros((14, 3), float)
+
     while not finish:
         i_frame += 1
 
@@ -190,9 +224,13 @@ def main(args):
         row = [i_frame] + list(points3d.ravel())
         rows.append(row)
 
+        # Update Tracking 3D
+        tracking_points3d = tracking(tracking_points3d, points3d)
+
         # Draw 3D
         visualize.anim_begin_update(ax, world_size=1.0)
-        plot_skeleton3d(ax, points3d, kps_colors_plt)
+        # plot_skeleton3d(ax, points3d, kps_colors_plt)
+        plot_skeleton3d(ax, tracking_points3d, kps_colors_plt)
         for cam_id, Rt in pose_dict.items():
             visualize.plot_camera(ax, Rt[:3, :3], Rt[:3, 3], cam_id, size=0.2)
         visualize.anim_end_update(ax)
