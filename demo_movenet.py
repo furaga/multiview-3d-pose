@@ -29,6 +29,8 @@ def main():
     # For webcam input:
     if args.video_dir is None:
         all_cam_ids = [0, 2, 3, 4]
+        all_caps = [cv2.VideoCapture(c) for c in all_cam_ids]
+        all_cam_ids = [f"camera_{p}" for p in all_cam_ids]
     else:
         all_video_paths = [
             args.video_dir / "camera_0.mp4",
@@ -38,11 +40,8 @@ def main():
         ]
         for p in all_video_paths:
             assert p.exists(), str(p)
-
-    all_cam_ids = [p.stem for p in all_video_paths]
-    print(all_cam_ids)
-
-    all_caps = [cv2.VideoCapture(str(c)) for c in all_video_paths]
+        all_cam_ids = [p.stem for p in all_video_paths]
+        all_caps = [cv2.VideoCapture(str(c)) for c in all_video_paths]
 
     movenet = MoveNet(args.model_select)
 

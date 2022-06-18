@@ -15,7 +15,7 @@ class MoveNet:
         else:
             sys.exit(f"invalid model_select {model_select}")
 
-        self.onnx_session = onnxruntime.InferenceSession(self.model_path)
+        self.onnx_session = onnxruntime.InferenceSession(self.model_path, providers=['TensorrtExecutionProvider'],)
 
     def run_inference(self, image):
         image_width, image_height = image.shape[1], image.shape[0]

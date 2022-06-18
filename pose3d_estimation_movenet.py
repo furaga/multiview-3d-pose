@@ -47,7 +47,7 @@ skeleton = [
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video_dir", required=True, type=Path)
+    parser.add_argument("--video_dir", default=None, type=Path)
     parser.add_argument("--threshold", type=float, default=0.4)
     parser.add_argument("--model_select", type=int, default=0)
     args = parser.parse_args()
@@ -93,7 +93,7 @@ def draw_skeleton2d(img, kps, kps_colors):
 
 def plot_skeleton3d(ax, points3d, kps_colors_plt):
     # keypoints
-    visualize.plot_points3d(ax, points3d, kps_colors_plt, center=(0, 0, 0), s=64)
+    visualize.plot_points3d(ax, points3d, kps_colors_plt, center=(0, 0, 0), s=128)
 
     # bones
     for a, b in skeleton:
@@ -107,14 +107,45 @@ def plot_skeleton3d(ax, points3d, kps_colors_plt):
                 "o-",
                 c=kps_colors_plt[a],
                 ms=0,
-                mew=1,
+                mew=3,
             )
 
 
-# TODO
-def tracking(tracking_points3d, points3d):
+prev_all_kps = {}
+
+
+def tracking_2d(all_kps, thr):
+    edges = {}
+    for a, b in skeleton:
+        edges.setdefault(a, []).append(b)
+        edges.setdefault(b, []).append(a)
+
+    for cam_id, kps in all_kps.items():
+        prev_all_kps.setdefault(cam_id, np.zeros_like(kps))
+        prev_kps = prev_all_kps[cam_id].copy()
+       
+        new_kps = kps.copy()
+        for _ in range(2):
+            for i, kp in enumerate(kps):
+                if kp[2] > thr:
+                    continue
+                pts = []
+                for t in edges[i]:
+                    near_kp = new_kps[t]
+                    if near_kp[2] < thr:
+                        continue
+                    pts.append(near_kp + prev_kps[i] - prev_kps[t])
+                new_kps[i] = np.mean(pts, axis=0)
+                new_kps[i][2] = 1
+
+        prev_all_kps[cam_id] = new_kps
+
+    return prev_all_kps
+
+
+def tracking_3d(tracking_points3d, points3d):
     prev = tracking_points3d.copy()
-    tracking_points3d = points3d.copy()
+    new_tracking_points3d = points3d.copy()
 
     edges = {}
     for a, b in skeleton:
@@ -123,23 +154,34 @@ def tracking(tracking_points3d, points3d):
 
     while True:
         modified = False
-        for i, kp in enumerate(tracking_points3d):
+        for i, kp in enumerate(new_tracking_points3d):
             if np.any(kp != 0):
                 continue
             modified = True
             pts = []
             for t in edges[i]:
-                t_kp = tracking_points3d[t]
+                t_kp = new_tracking_points3d[t]
                 if np.all(t_kp == 0):
                     continue
                 pts.append(t_kp + prev[i] - prev[t])
             new_kp = np.mean(pts, axis=0)
-            tracking_points3d[i] = new_kp
+            new_tracking_points3d[i] = new_kp
 
         if modified == False:
             break
 
-    return tracking_points3d
+    # 1Fで関節が移動できる量を制限
+    for i in range(len(new_tracking_points3d)):
+        p1 = prev[i]
+        p2 = new_tracking_points3d[i]
+        if np.any(p1 != 0) and np.any(p2 != 0):
+            dist = np.linalg.norm(p2 - p1)
+            if dist < 1e-3:
+                continue
+            dist = min(dist, 0.2)
+            new_tracking_points3d[i] = p1 + (p2 - p1) * dist
+
+    return new_tracking_points3d
 
 
 def main(args):
@@ -149,12 +191,16 @@ def main(args):
     mtx = calib_result.camera_matrix
     distort = calib_result.distort
 
-    all_video_paths = [args.video_dir / f"{name}.mp4" for name in pose_dict]
-    for p in all_video_paths:
-        assert p.exists(), str(p)
-
-    all_cam_ids = [p.stem for p in all_video_paths]
-    all_caps = [cv2.VideoCapture(str(p)) for p in all_video_paths]
+    if args.video_dir is None:
+        all_cam_ids = [0, 2, 3, 4]
+        all_caps = [cv2.VideoCapture(p) for p in all_cam_ids]
+        all_cam_ids = [f"camera_{p}" for p in all_cam_ids]
+    else:
+        all_video_paths = [args.video_dir / f"{name}.mp4" for name in pose_dict]
+        all_cam_ids = [p.stem for p in all_video_paths]
+        all_caps = [cv2.VideoCapture(str(p)) for p in all_video_paths]
+        for p in all_video_paths:
+            assert p.exists(), str(p)
 
     kps_colors = [
         (
@@ -200,6 +246,8 @@ def main(args):
         if img is None:
             break
 
+        all_kps = tracking_2d(all_kps, args.threshold)
+
         # Triangulate
         points3d = np.zeros((14, 3), float)
         for i in range(14):
@@ -220,15 +268,15 @@ def main(args):
                 if ret:
                     points3d[i] = pt3d
 
+        # Update Tracking 3D
+        tracking_points3d = tracking_3d(tracking_points3d, points3d)
+
         # Add Rows to Save
-        row = [i_frame] + list(points3d.ravel())
+        row = [i_frame] + list(tracking_points3d.ravel())
         rows.append(row)
 
-        # Update Tracking 3D
-        tracking_points3d = tracking(tracking_points3d, points3d)
-
         # Draw 3D
-        visualize.anim_begin_update(ax, world_size=1.0)
+        visualize.anim_begin_update(ax, world_size=2)
         # plot_skeleton3d(ax, points3d, kps_colors_plt)
         plot_skeleton3d(ax, tracking_points3d, kps_colors_plt)
         for cam_id, Rt in pose_dict.items():
@@ -237,6 +285,7 @@ def main(args):
 
         # Draw 2D
         for cam_id, cap in zip(all_cam_ids, all_caps):
+            # all_imgs[cam_id].fill(0)
             draw_skeleton2d(all_imgs[cam_id], all_kps[cam_id], kps_colors)
 
         all_imgs_ls = [all_imgs[cam_id] for cam_id in all_cam_ids]
@@ -246,6 +295,7 @@ def main(args):
                 cv2.hconcat(all_imgs_ls[2:]),
             ]
         )
+        show_img = cv2.resize(show_img, None, fx=0.7, fy=0.7)
         cv2.imshow(f"Cameras", show_img)
         if cv2.waitKey(1) == ord("q"):
             finish = True
